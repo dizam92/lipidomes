@@ -25,7 +25,7 @@ from graalpy.results_dataframe import load_results_recursively
 from graalpy.utils.pyjobber_utils import get_latest_experiment_folder
 from graalpy.utils.results import compare_algorithms
 from graalpy.utils.tableView import TestInfo, Resume
-from graalpy.dataset import create_hdf5_dataset
+from graalpy.dataset_partition import get_train_and_test_datasets
 
 CONTEXT = 'PC_lipidome'
 
@@ -42,7 +42,7 @@ def build_dataset(file_path, output_path, name, random_state_value):
     patients_name = data.index.values
 
     # the control patients name (to be written somewhere) in the hdf5?
-    patients_control_names = patients_name[51:].astype("string")
+    patients_name = patients_name.astype("string")
 
     # build array for graalpy
     data = data.as_matrix()
@@ -50,12 +50,14 @@ def build_dataset(file_path, output_path, name, random_state_value):
     # shuffle the data
     random.shuffle(x_zipped)
     data, target, patients_name = zip(*x_zipped)
+    # patients name and position(index) in the dataset
+    name_and_position = [(el, i) for i, el in enumerate(patients_name)]
 
     f = h5py.File(os.path.join(output_path, '{}.h5'.format(name)), 'w')
     f.create_dataset('data', data=data)
     f.create_dataset('target', data=target)
     # Reminder: goes into fit_parameters in graalpy
-    f.create_dataset('patients_control_name', data=patients_control_names)
+    f.create_dataset('name_and_position', data=name_and_position)
 
 def paralel_build_dataset(indices, r):
     """ A parallel caller ot the build_dataset function"""
@@ -90,6 +92,20 @@ def run_dispatcher(algorithms):
                               splitter=TrainTestSplitter(train_ratio=0.7),  # Proportion of the data to use for training
                               )
 
+def get_dataset_report(datset_path):
+    """ Get the name and indices of the data in the train and test. Graalpy just takke the 1st train_ratio elements of
+    the dataset, then it'll be easy to get them separatly by just taking the SAME train_ratio.
+    Note: If somehow graalpy made a shuffle before in the train_test_split, this is fucked up!!! """
+    from glob import glob
+    os.chdir(datset_path)
+    with open("Names_Of_patients", "ab") as report:
+        for fich in glob("*.h5"):
+            train_data, test_data = get_train_and_test_datasets(dataset_path=fich, split_ratio=0.7)
+            report.write("Dataset is: %s\n" % fich)
+            report.write("train infos: %s\n" % train_data.fit_parameters["name_and_position"][:71])
+            report.write("test infos: %s\n" % test_data.fit_parameters["name_and_position"][72:])
+            report.write("\n")
+
 def benchmark_tables(algorithms, hp_on_test=False):
     """ Example: Load results for two algorithms, keep best cross-validation results,
         build a single dataframe (indexing with the dataset name), output a LaTeX table.
@@ -118,37 +134,31 @@ def benchmark_pdf_report(algorithms, hp_on_test=False):
     minimize = True
     # The metrics to show in the tables. Set to None to keep the default values.
     # metrics_to_show = None
-    # metrics_to_show = ['test__zero_one_loss',
-    #                    'cv_mean__valid__zero_one_loss',
-    #                    'train__zero_one_loss',
-    #                    'learn_running_time',
-    #                    'test__precision',
-    #                    'train__precision',
-    #                    'test__sensitivity',
-    #                    'train__sensitivity',
-    #                    'test__specificity',
-    #                    'train__specificity',
-    #                    'test__accuracy',
-    #                    'train__accuracy'
-    #                    ]
 
-    # # metrics on test
-    # metrics_to_show = ['test__zero_one_loss',
-    #                    'cv_mean__valid__zero_one_loss',
-    #                    'test__precision',
-    #                    'test__sensitivity',
-    #                    'test__specificity',
-    #                    'test__accuracy',
-    #                    ]
-
-    # metrics on train
-    metrics_to_show = ['train__zero_one_loss',
-                       'cv_mean__valid__zero_one_loss',
-                       'train__precision',
-                       'train__sensitivity',
-                       'train__specificity',
-                       'train__accuracy',
+    # metrics on test
+    metrics_to_show = ['test__zero_one_loss',
+                       #'cv_mean__valid__zero_one_loss',
+                       #'test__precision',
+                       'test__sensitivity',
+                       'test__specificity',
+                       'test__accuracy',
                        ]
+    # # because the pdf table wont take it at all, build the zero_one_loss_per_example in another file
+    # metrics_to_show = ['test__zero_one_loss_per_example']
+
+    # # metrics on train
+    # metrics_to_show = ['train__zero_one_loss',
+    #                    'train__zero_one_loss_per_example',
+    #                    'cv_mean__valid__zero_one_loss',
+    #                    'train__precision',
+    #                    'train__sensitivity',
+    #                    'train__specificity',
+    #                    'train__accuracy',
+    #                    ]
+
+    # # because the pdf table wont take it at all, build the zero_one_loss_per_example in another file
+    # metrics_to_show = ['train__zero_one_loss_per_example']
+
     metric_to_compare = 'test__zero_one_loss'  # The metric to compare in the comparison table.
     table_name = 'Test Risk Comparison'  # The name of the table.
 
@@ -253,4 +263,5 @@ def main():
 
 if __name__ == '__main__':
     #run_dataset_builder()
-    main()
+    # main()
+    get_dataset_report("/home/maoss2/Documents/Doctorat/Datasets_repository/PC_lipidome")
